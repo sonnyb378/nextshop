@@ -4,6 +4,6 @@ export interface IPaymentMethod {
     cc: string;
     nameoncc: string;
     expdate: string;
-    cvc: string;
+    cvv: string;
   };
 }

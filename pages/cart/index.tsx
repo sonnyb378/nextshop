@@ -21,6 +21,9 @@ import { fakeCartItems } from '../../model/fake_cart_items';
 import { selectAuth} from '../../app/store/slices/auth';
 
 import { useAppContext, useAppContextSetters } from '../../context/state';
+import { ShopifyFunctions } from '../../utils/shopifyFunctions';
+import { selectProfile } from '../../app/store/slices/profile';
+import { setFlagsFromString } from 'v8';
 
 const Cart = (props: any) => {
 
@@ -31,6 +34,8 @@ const Cart = (props: any) => {
   const dispatch = useAppDispatch();
   const router = useRouter();
 
+  const profile = useAppSelector(selectProfile);
+
   const [cartItems, setCartItems] = useState<[ILinesEdges]|null>(null);
   const [cartCost, setCartCost] = useState<ICartCost>();
 
@@ -38,26 +43,50 @@ const Cart = (props: any) => {
 
   const [loadingCart, setLoadingCart] = useState(false);
 
-  const { cart: ctxCart } = useAppContext();
-  const { setCtxCart} = useAppContextSetters(); 
+  const { cart: ctxCart, checkout: ctxCheckout} = useAppContext();
+  const { setCtxCart, setCtxCheckout } = useAppContextSetters(); 
 
   useEffect(() => {
     const getCart = async () => {
       const response = await fetch(`${process.env.NEXT_PUBLIC_SHOP_URL}/api/cart/${getID(cart?.cartId!)}`)
       const result = await response.json();
       if (response.ok) {
-        console.log("setResultCartData: ", result?.data);
+        // console.log("setResultCartData: ", result?.data);
         setLoadingCart(false)
         setResultCartData(result?.data);
         setCtxCart(result?.data)
       }
     }
+
+    const checkoutAttributesUpdate = async () => {
+      if (checkout.checkoutId) {
+        const checkoutId = checkout.checkoutId;
+        const input = {
+          customAttributes: [
+            {
+              key: "cart",
+              value: cart.cartId
+            }
+          ]
+        }
+        const sf = new ShopifyFunctions();
+        const { response, result } = await sf.checkoutAttributesUpdateV2(checkoutId, input);
+        if (response.ok) {
+          setCtxCheckout(result.checkout);    
+        }
+        
+      }      
+    }
+    
     if (cart.cartId) {
       setLoadingCart(true)
       getCart();
     }
+
+    checkoutAttributesUpdate();
+
     
-  }, [cart?.cartId, setCtxCart])
+  }, [cart?.cartId, setCtxCart, checkout.checkoutId, profile.email, setCtxCheckout, auth.accessToken])
 
   useEffect(() => {
     setCartItems(resultCartData?.lines?.edges!);
@@ -65,24 +94,11 @@ const Cart = (props: any) => {
   },[resultCartData?.lines?.edges, resultCartData?.estimatedCost])
   
   const removeCartLineHandler = async (lineId: string) => {
-  
-    const response = await fetch(`${process.env.NEXT_PUBLIC_SHOP_URL}/api/cart/line`, {
-      method: "DELETE",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        variables: {
-          cartId: cart.cartId,
-          lineIds: [
-            lineId
-          ]
-        }
-      })
-    })
-    const removeResult = await response.json();
+    // cart line
+    const sf = new ShopifyFunctions();
+    const { response, result: removeResult } = await sf.cartLinesRemove(cart.cartId!, [lineId])
+    
     if (response.ok) {
-      console.log("removeResult: ", removeResult);
       if (removeResult) {
         let itemcount = 0
         removeResult.cartLinesRemove.cart.lines.edges.forEach((line:any) => {
@@ -94,7 +110,6 @@ const Cart = (props: any) => {
         }))
         setCartItems(removeResult?.cartLinesRemove?.cart?.lines?.edges!);
         setCartCost(removeResult?.cartLinesRemove?.cart.estimatedCost);
-
         setCtxCart(
           {
             id: removeResult.cartLinesRemove.cart.id, 
@@ -102,10 +117,25 @@ const Cart = (props: any) => {
             lines: removeResult?.cartLinesRemove?.cart?.lines
           }
         )
-
       }
       
     }
+
+    // //checkout line
+    if (checkout.checkoutId) {
+      const variant = ctxCart?.lines?.edges?.find((item:any) => {
+        return item.node.id === lineId;
+      })
+      const sf = new ShopifyFunctions();
+      const checkoutLineItem = await sf.getCheckoutLineId(ctxCheckout, `${variant?.node.merchandise.id}`);
+      const checkoutId = checkout.checkoutId;
+      const checkoutLineItemId = checkoutLineItem.node.id;
+      const { response, result } = await sf.checkoutLineItemsRemove(checkoutId, [checkoutLineItemId])
+      if (response.ok) {
+        setCtxCheckout(result?.checkout);
+      }
+    }
+
   }
 
   const onQuantityChangeHandler = async (q: number, line:any) => {
@@ -127,39 +157,56 @@ const Cart = (props: any) => {
       }
     }
 
-    const response = await fetch(`${process.env.NEXT_PUBLIC_SHOP_URL}/api/cart/line`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        variables: variables
-      })
-    })
-    const updateResult = await response.json();
-    if (response.ok) {
-      // console.log("updateResult: ", updateResult);
-      if (updateResult) {
+    const sf = new ShopifyFunctions();
+    const { response: updateCartResponse, result:updateCartResult } = await sf.cartLinesUpdate(variables);
+
+    if (updateCartResponse.ok) {
+      if (updateCartResult) {
         let itemcount = 0
-        updateResult.cartLinesUpdate.cart.lines.edges.forEach((line:any) => {
+        updateCartResult.cartLinesUpdate.cart.lines.edges.forEach((line:any) => {
           itemcount += line.node.quantity;
         })
         dispatch(setCartData({ 
-          cartId: updateResult.cartLinesUpdate.cart.id, 
+          cartId: updateCartResult.cartLinesUpdate.cart.id, 
           itemsCount: itemcount
         }))
-        setCartItems(updateResult?.cartLinesUpdate?.cart?.lines?.edges!);
-        setCartCost(updateResult?.cartLinesUpdate?.cart.estimatedCost);
-
+        setCartItems(updateCartResult?.cartLinesUpdate?.cart?.lines?.edges!);
+        setCartCost(updateCartResult?.cartLinesUpdate?.cart.estimatedCost);
         setCtxCart(
           {
-            id: updateResult.cartLinesUpdate.cart.id, 
-            estimatedCost: updateResult.cartLinesUpdate.cart.estimatedCost,
-            lines: updateResult?.cartLinesUpdate?.cart?.lines
+            id: updateCartResult.cartLinesUpdate.cart.id, 
+            estimatedCost: updateCartResult.cartLinesUpdate.cart.estimatedCost,
+            lines: updateCartResult?.cartLinesUpdate?.cart?.lines
           }
         )
       }
     }
+
+    // checkoutLineItemsUpdate
+    if (checkout.checkoutId) {
+      const cartLineVariantId = line.merchandise.id;
+      const sf = new ShopifyFunctions();
+
+      const checkoutLineItem = await sf.getCheckoutLineId(ctxCheckout, `${cartLineVariantId}`);
+      const attrs = checkoutLineItem.node.customAttributes.map((item:any) => {
+        return { key: item.key, value: item.value }
+      })
+      const inputVars = {
+        checkoutId: `${checkout.checkoutId}`,
+        lineItems: {
+          customAttributes: attrs,
+          id: checkoutLineItem.node.id,
+          quantity: q,
+          variantId: cartLineVariantId
+        }
+      }
+      const { response, result } = await sf.checkoutLineItemsUpdate(inputVars.checkoutId, inputVars.lineItems) 
+      if (response.ok) {
+        setCtxCheckout(result?.checkout);
+      }
+      
+    }
+    
 
   }
 
@@ -167,8 +214,77 @@ const Cart = (props: any) => {
     router.push(`/products/${id}`)
   }
 
+  const onCheckoutHandler = async () => {
+    // console.log("checkoutId: ", checkout.checkoutId );
+
+    if (checkout.checkoutId) {
+      // checkoutAttributesUpdateV2
+      if (auth.accessToken) {
+        const checkoutId = checkout.checkoutId;
+        const sf = new ShopifyFunctions();
+        const input = {
+          customAttributes: [
+            {
+              key: "cart",
+              value: cart.cartId
+            }
+          ]
+        }
+        const { response, result } = await sf.checkoutAttributesUpdateV2(checkoutId, input);
+        if (response.ok) {
+          console.log("checkoutAttributesUpdate: ", result);
+          setCtxCheckout(result?.checkout);    
+          router.push('/checkout')
+        }        
+      } else {
+        router.push('/auth/signin?redirect=cart')
+      }
+    } else {
+      // checkoutCreate
+      const variants = ctxCart.lines?.edges?.map((variant:any) => {
+        return {
+          variantId: variant.node.merchandise.id,
+          quantity: variant.node.quantity
+        }
+      })
+      const inputVars = {
+        allowPartialAddresses: true,
+        lineItems: variants
+      }
+      
+      const sf = new ShopifyFunctions();
+      const { response, result } = await sf.checkoutCreate(inputVars);
+
+      if (response.ok) {
+        setCtxCheckout(result);              
+        dispatch(setCheckoutData({
+          checkoutId: result.checkout.id,
+          webUrl: result.checkout.webUrl
+        }))
+
+        if (auth.accessToken) {
+          console.log("checkoutCreate: 1: ", result);
+          router.push('/checkout')
+        } else {
+          router.push('/auth/signin?redirect=cart')
+        }
+      } else {
+        if (auth.accessToken) {
+          console.log("checkoutCreate: 2:  ", result);
+          router.push('/checkout')
+        } else {
+          router.push('/auth/signin?redirect=cart')
+        }
+      }
+
+    }
+    
+  }
+
+
   const renderCartItems = cartItems && cartItems.map((product:any, k:any) => {
     // console.log(product)
+
     return <div key={k} className="flex items-stretch justify-start ring-1 ring-gray-300 p-5 rounded-xl mb-2 bg-white relative">
       <div className="ring-0 ring-gray-100 w-[150px] h-[150px] relative overflow-hidden group">        
         <Image 
@@ -239,22 +355,12 @@ const Cart = (props: any) => {
     </div>
   });
   
-  // console.log("renderCartItems: ", cartItems );
-  const onCheckoutHandler = async () => {
-    console.log("renderCartItems: ", cartItems );
 
-    if (auth.accessToken) {
-      router.push('/checkout')
-    } else {
-      router.push('/auth/signin?redirect=checkout')
-    }
-    
 
-    
-  }
-
-  // console.log("ctxCart: ", ctxCart);
-  // console.log("ctxContactInformation: ", ctxContactInformation)
+  // useEffect(() => {
+  //   console.log("cart: ctxCart: ", ctxCart);
+  //   console.log("cart: ctxCheckout: ", ctxCheckout);
+  // })
 
   return (
     <div>

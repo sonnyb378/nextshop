@@ -97,8 +97,8 @@ const CREATE_CART = gql`
 `;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<Data>) {
+  const method = req.method;
   const { cartVariables } = req.body;
-
   const inputVars = {
     input: cartVariables,
   };

@@ -30,6 +30,7 @@ import { useAppContext, useAppContextSetters } from '../../context/state';
 
 import { setCheckoutData } from '../../app/store/slices/checkout';
 import DropdownAddress from '../../components/input/DropdownAddress';
+import { ShopifyFunctions } from '../../utils/shopifyFunctions';
 
 // import { IShippingInformation } from '../../ts/context/interfaces/shipping_information';
 
@@ -54,6 +55,27 @@ const deliveryMethod = [
   }
 ]
 
+interface CheckoutCreateData {
+  availableShippingRates: {
+    ready: boolean;
+    shippingRates: [
+      {
+        handle: string;
+        title: string;
+        priceV2: {
+          amount: string;
+          currencyCode: string;
+        }
+      }
+    ]
+  },
+  subtotalPriceV2: any,
+  shippingLine: any,
+  totalTaxV2: any
+  totalPriceV2: any,
+  lineItems: any
+}
+
 const Checkout = (props: any) => {
   const cart = useAppSelector(selectCart);
   const profile = useAppSelector(selectProfile);
@@ -62,26 +84,34 @@ const Checkout = (props: any) => {
   const router = useRouter();
   const dispatch = useAppDispatch();
   const [ pageLoading, setPageLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+  const [error, setError] = useState("");
 
   const [shippingInformationLoading, setShippingInformationLoading] = useState(false);
-  const [deliveryMethodLoading, setDeliveryMethodLoading] = useState(false);
+  const [shippingRateLoading, setShippingRateLoading] = useState(false);
   const [paymentMethodLoading, setPaymentMethodLoading] = useState(false);
 
   const [shippingAddressSelected, setShippingAddressSelected] = useState(false);
-  const [deliveryMethodSelected, setDeliveryMethodSelected] = useState(false);
+  const [shippingRateSelected, setShippingRateSelected] = useState(false);
   const [paymentMethodSelected, setPaymentMethodSelected] = useState(false);
   const [allowConfirmOrder, setAllowConfirmOrder] = useState(false);
 
+  const [checkoutCreateData, setCheckoutCreateData] = useState<CheckoutCreateData|null>(null);
+  const [selectedShippingRate, setSelectedShippingRate] = useState<string|null>(null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string|null>("cc");
+
   const { 
     cart: ctxCart, 
+    checkout: ctxCheckout,
     contactInformation: ctxContactInformation, 
     shippingInformation: ctxShippingInformation,
-    deliveryMethod: ctxDliveryMethod,
+    deliveryMethod: ctxDeliveryMethod,
     paymentMethod: ctxPaymentMethod
   } = useAppContext();
 
   const { 
     setCtxCart,
+    setCtxCheckout,
     setCtxContactInformation,
     setCtxShippingInformation,
     setCtxDeliveryMethod,
@@ -111,21 +141,19 @@ const Checkout = (props: any) => {
   
   const [loadingCustomer, setLoadingCustomer] = useState(false);
   const [selectedAddressId, setSelectedAddressId] = useState("")
-  const [selectedAddressText, setSelectedAddressText] = useState("");
-  const [isChecked, setIsChecked] = useState(true)
+  // const [selectedAddressText, setSelectedAddressText] = useState("");
+  const [isChecked, setIsChecked] = useState(false)
 
 
   useEffect(() => {   
     const getCustomer = async () => {
       if (auth.accessToken) {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_SHOP_URL}/api/customer/${auth.accessToken}`)
-        const result = await response.json();
-        // console.log("--> ",result, response.ok);
+        const sf = new ShopifyFunctions();
+        const {response,result} = await sf.customer(auth.accessToken);
         if (response.ok) {
           // setAddressLoading(false);   
           setLoadingCustomer(false)       
           setSelectedAddressId(result?.customer?.defaultAddress.id);
-
           setUserAddresses({
             defaultAddress: result?.customer?.defaultAddress, 
             addresses: result?.customer?.addresses?.edges
@@ -134,12 +162,12 @@ const Checkout = (props: any) => {
           if (auth.accessToken) {
             const defaultAddress = result?.customer?.addresses?.edges.filter((address: { node: { id: string | undefined; }; }) => result?.customer?.defaultAddress.id === address.node.id)
 
-            // console.log("default address: ", defaultAddress);
+            setShippingAddressSelected(false);
+            setShippingRateSelected(false);  
+            setPaymentMethodSelected(false)
+            
             setCtxContactInformation(profile?.email!)
             if (defaultAddress) {
-              const addressLine = `${defaultAddress![0].node.address1 && defaultAddress![0].node.address1} ${defaultAddress![0].node.address2 && `, ${defaultAddress![0].node.address2}`} ${defaultAddress![0].node.city && defaultAddress![0].node.city} ${defaultAddress![0].node.province && defaultAddress![0].node.provinceCode} ${defaultAddress![0].node.zip && defaultAddress![0].node.zip} ${defaultAddress![0].node.country && defaultAddress![0].node.countryCodeV2} (${defaultAddress![0].node.firstName && defaultAddress![0].node.firstName} ${defaultAddress![0].node.lastName && defaultAddress![0].node.lastName})`;
-
-              setSelectedAddressText(addressLine)
               setCtxShippingInformation({
                 firstname: defaultAddress![0].node.firstName,
                 lastname: defaultAddress![0].node.lastName,
@@ -154,11 +182,9 @@ const Checkout = (props: any) => {
                   description: defaultAddress![0].node.country
                 },
                 phone: defaultAddress![0].node.phone,
-              })
-            }
-            
+              })              
+            }            
           }
-          
 
         }
       } else {
@@ -170,24 +196,36 @@ const Checkout = (props: any) => {
     getCustomer();
   },[auth.accessToken, setCtxShippingInformation, profile?.email, setCtxContactInformation])
 
+  useEffect(() => {
+    // checkoutAttributesUpdateV2
+    const checkoutAttributesUpdate = async () => {
+      if (checkout.checkoutId) {
+        const checkoutId = checkout.checkoutId;
+        const input = {
+          customAttributes: [
+            {
+              key: "cart",
+              value: cart.cartId
+            }
+          ]
+        }
+        const sf = new ShopifyFunctions();
+        const { response, result } = await sf.checkoutAttributesUpdateV2(checkoutId, input);
+        if (response.ok) {
+          console.log("checkoutAttributesUpdateV2: ",result.checkout); 
+        }
+      }
+    }
+    checkoutAttributesUpdate();
+
+    ////
+  },[cart.cartId, checkout.checkoutId]);
 
   const removeCartLineHandler = async (lineId: string) => {
   
-    const response = await fetch(`${process.env.NEXT_PUBLIC_SHOP_URL}/api/cart/line`, {
-      method: "DELETE",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        variables: {
-          cartId: cart.cartId,
-          lineIds: [
-            lineId
-          ]
-        }
-      })
-    })
-    const removeResult = await response.json();
+    const sf = new ShopifyFunctions();
+    const { response, result: removeResult } = await sf.cartLinesRemove(cart.cartId!, [lineId])
+    
     if (response.ok) {
       // console.log("removeResult: ", removeResult);
       if (removeResult) {
@@ -199,8 +237,6 @@ const Checkout = (props: any) => {
           cartId: removeResult.cartLinesRemove.cart.id, 
           itemsCount: itemcount
         }))
-        // setCartItems(removeResult?.cartLinesRemove?.cart?.lines?.edges!);
-        // setCartCost(removeResult?.cartLinesRemove?.cart.estimatedCost);
         setCtxCart(
           {
             id: removeResult.cartLinesRemove.cart.id, 
@@ -210,6 +246,23 @@ const Checkout = (props: any) => {
         )
       }
     }
+
+    // get checkout line id
+    if (checkout.checkoutId) {
+      const variant = ctxCart?.lines?.edges?.find((item:any) => {
+        return item.node.id === lineId;
+      })
+      const sf = new ShopifyFunctions();
+      const checkoutLineItem = await sf.getCheckoutLineId(ctxCheckout, `${variant?.node.merchandise.id}`);
+      const checkoutId = checkout.checkoutId;
+      const checkoutLineItemId = checkoutLineItem.node.id;
+      const { response, result } = await sf.checkoutLineItemsRemove(checkoutId, [checkoutLineItemId])
+      if (response.ok) {
+        setCtxCheckout(result?.checkout);
+      }
+    }
+
+
   }
 
   const onQuantityChangeHandler = async (q: number, line:any) => {
@@ -221,6 +274,11 @@ const Checkout = (props: any) => {
       }
     })
 
+    // const checkoutLine = checkoutCreateData && checkoutCreateData?.lineItems?.edges?.filter((item:any) => {
+    //   return item.node.variant.id === line.merchandise.id;
+    // })
+    // console.log("checkoutLine: ", checkoutLine);
+
     const variables = {
       "cartId": cart.cartId,
       "lines": {
@@ -231,44 +289,59 @@ const Checkout = (props: any) => {
       }
     }
 
-    const response = await fetch(`${process.env.NEXT_PUBLIC_SHOP_URL}/api/cart/line`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        variables: variables
-      })
-    })
-    const updateResult = await response.json();
-    if (response.ok) {
-      // console.log("updateResult: ", updateResult);
-      if (updateResult) {
+    const sf = new ShopifyFunctions();
+    const { response: updateCartResponse, result:updateCartResult } = await sf.cartLinesUpdate(variables);
+
+    if (updateCartResponse.ok) {
+      if (updateCartResponse) {
         let itemcount = 0
-        updateResult.cartLinesUpdate.cart.lines.edges.forEach((line:any) => {
+        updateCartResult.cartLinesUpdate.cart.lines.edges.forEach((line:any) => {
           itemcount += line.node.quantity;
         })
         dispatch(setCartData({ 
-          cartId: updateResult.cartLinesUpdate.cart.id, 
+          cartId: updateCartResult.cartLinesUpdate.cart.id, 
           itemsCount: itemcount
         }))
-        // setCartItems(updateResult?.cartLinesUpdate?.cart?.lines?.edges!);
-        // setCartCost(updateResult?.cartLinesUpdate?.cart.estimatedCost);
         setCtxCart(
           {
-            id: updateResult.cartLinesUpdate.cart.id, 
-            estimatedCost: updateResult.cartLinesUpdate.cart.estimatedCost,
-            lines: updateResult?.cartLinesUpdate?.cart?.lines
+            id: updateCartResult.cartLinesUpdate.cart.id, 
+            estimatedCost: updateCartResult.cartLinesUpdate.cart.estimatedCost,
+            lines: updateCartResult?.cartLinesUpdate?.cart?.lines
           }
         )
       }
+    }
+
+    // checkoutLineItemsUpdate
+    if (checkout.checkoutId) {
+      const cartLineVariantId = line.merchandise.id;
+      const sf = new ShopifyFunctions();
+
+      const checkoutLineItem = await sf.getCheckoutLineId(ctxCheckout, `${cartLineVariantId}`);
+      const attrs = checkoutLineItem.node.customAttributes.map((item:any) => {
+        return { key: item.key, value: item.value }
+      })
+      const inputVars = {
+        checkoutId: `${checkout.checkoutId}`,
+        lineItems: {
+          customAttributes: attrs,
+          id: checkoutLineItem.node.id,
+          quantity: q,
+          variantId: cartLineVariantId
+        }
+      }
+      const { response, result } = await sf.checkoutLineItemsUpdate(inputVars.checkoutId, inputVars.lineItems) 
+      if (response.ok) {
+        setCtxCheckout(result?.checkout);
+      }
+      
     }
 
   }
 
   const onSelectAddress = (e:any) => {
     // console.log("selected address: ", e);
-
+    setHasError(false)
     if (e === "new_address") {
       setSelectedAddressId("new_address");
       setCtxShippingInformation({
@@ -284,14 +357,10 @@ const Checkout = (props: any) => {
         country: Countries[231],
         phone: ""
       })
-      setSelectedAddressText("");
+      setIsChecked(true)
     } else {
       setSelectedAddressId(e);
       const selected = userAddresses?.addresses?.filter(address => e === address.node.id)
-  
-      const addressLine = `${selected![0].node.address1 && selected![0].node.address1} ${selected![0].node.address2 && `, ${selected![0].node.address2}`} ${selected![0].node.city && selected![0].node.city} ${selected![0].node.province && selected![0].node.provinceCode} ${selected![0].node.zip && selected![0].node.zip} ${selected![0].node.country && selected![0].node.countryCodeV2} (${selected![0].node.firstName && selected![0].node.firstName} ${selected![0].node.lastName && selected![0].node.lastName})`;
-      setSelectedAddressText(addressLine);
-
       setCtxShippingInformation({
         ...ctxShippingInformation,
         firstname: selected![0].node.firstName,
@@ -308,56 +377,84 @@ const Checkout = (props: any) => {
         },
         phone: selected![0].node.phone,
       })
+      setIsChecked(false);
     }
 
   }
 
+  const onSelectShippingRate = (handle:any) => {
+    setSelectedShippingRate(handle)  
+  }
+
+  const onSelectPaymentMethod = (value:any) => {
+    console.log("payment method: ", value);
+    setSelectedPaymentMethod(value)
+
+    if (value === "paypal") {
+      setCtxPaymentMethod({
+        ...ctxPaymentMethod,
+        type: value,
+        info: {
+          cc: "",
+          nameoncc: "",
+          expdate: "",
+          cvv: ""
+        }
+      })
+    } else {
+      setCtxPaymentMethod({
+        ...ctxPaymentMethod,
+        type: value
+      })
+    }
+
+  }
 
   const onRedirectHandler = (id:string) => {
     router.push(`/products/${id}`)
   }
 
-  // console.log(cartItems);
-
   const onLoginHandler = () => {
     router.push('/auth/signin?redirect=checkout')
   }
 
-  // console.log("formState", formState);
-
   const onShippingAddressHandler = async () => {
     setShippingInformationLoading(true);
     
-    console.log("send checkoutCreate");   
+    const {
+      firstname: firstName,
+      lastname: lastName,
+      address1, address2, city, company, country, province, zip, phone
+    } = ctxShippingInformation
+
+    if (!firstName || !lastName || !address1 || !city || !zip || !province) {
+      // console.log("required field");
+      setHasError(true)
+      setShippingInformationLoading(false);
+      setShippingAddressSelected(false)
+      return
+    }
 
     const addressShipping = {
-      address1: ctxShippingInformation.address1,
-      address2: ctxShippingInformation.address2,
-      city: ctxShippingInformation.city,
-      company: ctxShippingInformation.company,
-      country: ctxShippingInformation.country.description,
-      firstName: ctxShippingInformation.firstname,
-      lastName: ctxShippingInformation.lastname,
-      phone: ctxShippingInformation.phone,
-      province: ctxShippingInformation.province,
-      zip: ctxShippingInformation.zip
+      address1: address1,
+      address2: address2,
+      city: city,
+      company: company,
+      country: country.description,
+      firstName: firstName,
+      lastName: lastName,
+      phone: phone,
+      province: province,
+      zip: zip
     }
 
     if (checkout.checkoutId) {
+      const sf = new ShopifyFunctions();
       // checkoutShippingAddressUpdateV2
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SHOP_URL}/api/checkout/address`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          checkoutId: checkout.checkoutId,
-          shippingAddress: addressShipping
-        })
-      })
-      const result = await response.json();
+      const { response, result } = await sf.checkoutShippingAddressUpdateV2(checkout.checkoutId, addressShipping);
       if (response.ok) {
-        console.log("update address: ", result);
+        setCheckoutCreateData(result.checkout)
+        setSelectedShippingRate(result.checkout?.availableShippingRates?.shippingRates[0].handle || null)
         setShippingInformationLoading(false);
         setShippingAddressSelected(true)
         dispatch(setCheckoutData({
@@ -365,90 +462,131 @@ const Checkout = (props: any) => {
           webUrl: result.checkout.webUrl
         }))
       }
+      // console.log("isChecked: ", isChecked);
+      // customerAddressCreate
+      if (isChecked) {
+        const { response, result } = await sf.customerAddressCreate(addressShipping, `${auth.accessToken}`)
+        if (response.ok) {
+            setSelectedAddressId("new_address");
+        }
+      } 
 
+      // get customer address
+      const {
+        response: responseCustomer, 
+        result: resultCustomer
+      } = await sf.customer(`${auth.accessToken}`);
+
+      if (responseCustomer.ok) { 
+        // console.log("customer: ", resultCustomer);
+        setUserAddresses({
+          defaultAddress: resultCustomer?.customer?.defaultAddress, 
+          addresses: resultCustomer?.customer?.addresses?.edges
+        });
+      }
 
     } else {
-      // checkoutCreate
-      const variants = ctxCart.lines?.edges?.map((variant:any) => {
-        const attributes = variant.node.attributes.map((attr:any) => {
-          return { key: attr.key, value:attr.value}
-        });
-        return {
-          customAttributes: attributes,
-          variantId: variant.node.merchandise.id,
-          quantity: variant.node.quantity
-        }
-      })
-      const inputVars = {
-        email: ctxContactInformation.email,
-        buyerIdentity: {
-          countryCode: ctxShippingInformation.country.name,
-        },
-        lineItems: variants,
-        shippingAddress: addressShipping
-      }
-      
-      console.log("inputVars: ", inputVars)
-
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SHOP_URL}/api/checkout`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          inputVariables: inputVars,
-          queueToken: ""
-        })
-      })
-      const result = await response.json();
-      if (response.ok) {      
-        if (!checkout.checkoutId) {
-          setShippingInformationLoading(false);
-          setShippingAddressSelected(true)
-          dispatch(setCheckoutData({
-            checkoutId: result.checkout.id,
-            webUrl: result.checkout.webUrl
-          }))
-        }
-      }
+      router.push('/cart')
     }
     
 
   }
 
-  // const onDeliveryMethodHandler = () => {
-  //   console.log("delivery method selected");
-  //   setDeliveryMethodLoading(true);
-  //   setTimeout(() => {
-  //     setDeliveryMethodSelected(true)
-  //     setDeliveryMethodLoading(false);
-  //   }, 1500)
-  // }
+  const onDeliveryMethodHandler = async () => {
+    console.log('shipping rate selected: ', selectedShippingRate);    
+    setShippingRateLoading(true)
 
-  // const onPaymentMethodHandler = () => {
-  //   console.log("payment method selected");
-  //   setPaymentMethodLoading(true);
-  //   setTimeout(() => {
-  //     setPaymentMethodSelected(true)
-  //     setPaymentMethodLoading(false);
-  //   }, 1500)
-  // }
+    // checkoutShippingLineUpdate
+    const response = await fetch(`${process.env.NEXT_PUBLIC_SHOP_URL}/api/checkout/shippingrate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        checkoutId: checkout.checkoutId,
+        shippingRateHandle: selectedShippingRate
+      })
+    })
+    const result = await response.json();
+    if (response.ok) {
+      setCheckoutCreateData(result.checkout)
+      setShippingRateLoading(false)
+      const selectedShipping = checkoutCreateData?.availableShippingRates.shippingRates.filter((rate) => selectedShippingRate === rate.handle)
+      setShippingRateSelected(true);   
+      setCtxDeliveryMethod({
+        handle: selectedShipping![0].handle,
+        title: selectedShipping![0].title,
+        priceV2: {
+          amount: selectedShipping![0].priceV2.amount,
+          currencyCode: selectedShipping![0].priceV2.currencyCode
+        }
+      })
+    }
+
+  }
+
+
+  const onPaymentMethodHandler = () => {
+    console.log("payment method selected");
+    setPaymentMethodLoading(true);
+    
+    setTimeout(() => {
+      setPaymentMethodSelected(true)
+      setPaymentMethodLoading(false);
+
+    }, 1500)
+
+  }
 
   const onEditShippingAddressHandler = () => {
     setShippingAddressSelected(false)
+    setShippingRateSelected(false);
+    setIsChecked(false);
+    if (checkoutCreateData) {
+      setSelectedShippingRate(checkoutCreateData?.availableShippingRates?.shippingRates[0].handle)
+    }
+    setError("")
+    console.log("onEditShippingAddressHandler: ", userAddresses);
   }
 
-  // const onEditDeliveryMethodHandler = () => {
-  //   setDeliveryMethodSelected(false);
-  // }
+  const onEditDeliveryMethodHandler = () => {
+    // setSelectedShippingRate("");
+    setShippingRateSelected(false);
+  }
 
-  // const onEditPaymentMethodHandler = () => {
-  //   setPaymentMethodSelected(false);
-  // }
+  const onEditPaymentMethodHandler = () => {
+    setPaymentMethodSelected(false);
+  }
 
 
-  const onConfirmOrderHandler = () => {
-    console.log("confirm order");
+  const onConfirmOrderHandler = async () => {
+    console.log("confirm order: ", ctxPaymentMethod);
+    // TODO:
+    // 1. send cc info to stripe for card token
+    // 2. use return card token in checkoutCompleteWithTokenizedPaymentV3 to complete checkout
+
+    // success payment : 4242424242424242
+    // failed payment: 4000000000009995
+    // requires authentication: 4000002500003155
+
+    // cc number: 4242424242424242
+    // cc exp.date: 7
+    // cc year: 2023
+    // cvv: 123
+
+    // const sf = new ShopifyFunctions();
+    // const { response, result } =  await sf.paymentStripe(
+    //   "4242424242424242",
+    //   7,
+    //   2023,
+    //   "314"
+    // );
+    // if (response.ok) {
+    //   console.log("result: ", result);
+    //   // checkoutCompleteWithTokenizedPaymentV3
+    // }
+
+
   }
 
   const renderCartItems = ctxCart && ctxCart?.lines?.edges?.map((product:any, k:any) => {
@@ -532,7 +670,7 @@ const Checkout = (props: any) => {
   const renderSelectedShippingAddress = shippingAddressSelected && <section className='flex items-start'>
       <h1 className="text-gray-500">Ship To:</h1>
       <div className="ml-3">
-        <h2 className=''>
+        <h2 className='font-semibold'>
           {ctxShippingInformation.firstname}{" "}{ctxShippingInformation.lastname} 
         </h2>
         <div>
@@ -542,6 +680,45 @@ const Checkout = (props: any) => {
         </div>      
       </div>           
     </section>
+
+  const renderSelectedShippingRate = shippingRateSelected && <section className='flex items-start'>
+    <h1 className="text-gray-500">Shipping Rate:</h1>
+    <div className="ml-3">
+      <div>
+        <div className="font-semibold">{ctxDeliveryMethod.title}</div>
+        <div>
+          {
+            ctxDeliveryMethod.priceV2.amount === "0.0" ? 
+            <span>FREE</span>
+          :
+            <div>
+              { ctxDeliveryMethod.priceV2.currencyCode }{" "}
+              { parseFloat(ctxDeliveryMethod.priceV2.amount).toFixed(2) }
+            </div>
+          }
+          </div>
+      </div>      
+    </div>           
+  </section>
+
+  const renderSelectedPayment = paymentMethodSelected && <section className='flex items-start'>
+    <h1 className="text-gray-500">Payment:</h1>
+    <div className="ml-3">
+      <div>
+        <div className="font-semibold">{ctxPaymentMethod.type === "cc" ? "Credit Card" : `${ctxPaymentMethod.type.substring(0,1).toUpperCase()}${ctxPaymentMethod.type.substring(1)}`}</div>
+        <div>
+          { ctxPaymentMethod.info.cc }
+        </div>
+      </div>      
+    </div>           
+  </section>
+
+  useEffect(() => {
+    console.log("ctxCart:::::: ",ctxCart);
+    console.log("checkoutCreateData:::::::",checkoutCreateData);
+    console.log("ctxPaymentMethod:::::::", ctxPaymentMethod);
+    console.log(shippingRateSelected, paymentMethodSelected);
+  },[ctxCart, checkoutCreateData, ctxPaymentMethod, shippingRateSelected, paymentMethodSelected])
 
   return (
     <div>
@@ -592,13 +769,21 @@ const Checkout = (props: any) => {
                           onChangeHandler={(e:any) => setCtxContactInformation(e.target.value
                           )}
                           disabled={ctxContactInformation.email ? true : false}
+                          required={true}
                           />
                         </section>
 
                         <section className='mt-5 pt-5 text-sm space-y-2
                             md:mt-0 md:p-5 md:w-full'>
+                              {
+                                error ? <div className="text-red-500 mb-3">{error}</div> : ""
+
+                              }
                               <div className="flex items-center justify-between">
-                                <h1 className="text-lg font-semibold text-primary">Shipping Address</h1>
+                                <h1 className="text-lg font-semibold text-primary">
+                                  Shipping Information{" "}
+                                  <span className="text-gray-400 text-xs font-normal">(Where to deliver the package)</span>
+                                </h1>
                                 {
                                   shippingAddressSelected &&
                                   <PencilIcon onClick={onEditShippingAddressHandler} className="w-4 h-4 cursor-pointer
@@ -609,24 +794,21 @@ const Checkout = (props: any) => {
                           {
                             userAddresses && userAddresses.addresses && 
                                 <>
+                                  
                                 {
-                                  !shippingAddressSelected && 
-                                
+                                  shippingAddressSelected ? <div>
+                                    {
+                                      renderSelectedShippingAddress
+                                    }
+                                  </div>
+                                  :
                                   <div className="">
                                     <DropdownAddress 
                                       title=""
                                       value={selectedAddressId}
                                       options={userAddresses.addresses}
                                       onChangeHandler={(e:any) => onSelectAddress(e)}
-                                    />
-                                  
-                                  </div>
-                                }
-                                {
-                                  shippingAddressSelected && <div>
-                                    {
-                                      renderSelectedShippingAddress
-                                    }
+                                    />                                  
                                   </div>
                                 }
                                 </>
@@ -645,6 +827,8 @@ const Checkout = (props: any) => {
                                     firstname: e.target.value
                                   }
                                 )}
+                                hasError={hasError}
+                                required={true}
                                 />
                                 <InputFields type="text" title="Last Name:" id="lastname" name="lastname" placeholder="Last Name" 
                                 value={ctxShippingInformation.lastname || ""}
@@ -652,6 +836,8 @@ const Checkout = (props: any) => {
                                   ...ctxShippingInformation,
                                   lastname: e.target.value
                                 })}
+                                required={true}
+                                hasError={hasError}
                                 />
                               </div>
                               <div className="space-y-2">
@@ -669,6 +855,8 @@ const Checkout = (props: any) => {
                                   ...ctxShippingInformation,
                                   address1: e.target.value
                                 })}
+                                required={true}
+                                hasError={hasError}
                                 />
                                 <InputFields type="text" title="Apartment#, Suite, etc." id="address2" name="address2" placeholder="" 
                                 value={ctxShippingInformation.address2 || ""}
@@ -687,6 +875,8 @@ const Checkout = (props: any) => {
                                   ...ctxShippingInformation,
                                   city: e.target.value
                                 })}
+                                required={true}
+                                hasError={hasError}
                                 />
                                 <InputFields type="text" title="State / Province:" id="province" name="province" placeholder="State / Province" 
                                 value={ctxShippingInformation.province || ""}
@@ -694,6 +884,8 @@ const Checkout = (props: any) => {
                                   ...ctxShippingInformation,
                                   province: e.target.value
                                 })}
+                                required={true}
+                                hasError={hasError}
                                 />
                                 
                               </div>
@@ -707,6 +899,8 @@ const Checkout = (props: any) => {
                                   ...ctxShippingInformation,
                                   zip: e.target.value
                                 })}
+                                required={true}
+                                hasError={hasError}
                                 />
                                 <Dropdown 
                                   title="Country:"
@@ -726,12 +920,14 @@ const Checkout = (props: any) => {
                                   phone: e.target.value
                                 })}
                               />
-
+                              {
+                                selectedAddressId === "new_address" &&
+                              
                               <div className="flex items-center h-5 py-5">
                                 <input onChange={(e) => setIsChecked(e.target.checked) } checked={isChecked}  id="marketing" type="checkbox" value="" className="w-4 h-4 border border-gray-300 rounded bg-gray-50 focus:ring-3 focus:ring-blue-300 " />
                                 <label htmlFor="marketing" className="ml-2 text-sm font-sm text-black">Save this address?</label>  
                               </div>
-                              
+                              }
 
                             </>
                           }
@@ -739,14 +935,14 @@ const Checkout = (props: any) => {
                           
                           {
                             !shippingAddressSelected &&                          
-                            <div onClick={onShippingAddressHandler} className="flex w-full items-center justify-center  bg-sky-700 py-3 px-5 text-white rounded-lg group cursor-pointer space-x-3">
+                            <div onClick={onShippingAddressHandler} className="flex w-full items-center justify-center  bg-sky-700 py-3 px-5 text-white rounded-lg group cursor-pointer space-x-3 ">
                               {
                                 shippingInformationLoading &&
                                 <Spinner  primaryColor="fill-primary" secondaryColor='text-sky-700' ringColor="text-sky-200" 
                                 w="w-6" h="h-6" title="" />
                               }
                               <button className="group-hover:text-orange-200">
-                                I want to use this address
+                                Continue to Shipping
                               </button>
                               <ChevronRightIcon className="group-hover:text-orange-200 w-4 h-4"/>
                             </div>
@@ -754,51 +950,232 @@ const Checkout = (props: any) => {
 
                         </section>
                         
-                      
-                        <section className='mt-5 pt-5 text-sm space-y-2
-                      md:mt-0 md:p-5 md:w-full'>
-                          <div className="flex items-center justify-between">
-                                <h1 className="text-lg font-semibold text-primary">Delivery Method</h1>
-                                
-                              </div>
-                          
-                          <div className="flex space-x-2 p-2 w-full
-                          md:flex-row md:rounded-lg">
-                          {
-                            deliveryMethod && deliveryMethod.map((delivery) => {
-                              return (
-                                <div key={delivery.id} className="flex flex-col justify-between w-full p-3 ring-1 ring-gray-200 rounded-lg cursor-pointer hover:ring-1 hover:ring-primary hover:bg-slate-50">
-                                  <div>
-                                    <h1 className="text-lg" >{delivery.title}</h1>
-                                    <h2 className="text-sm text-gray-500">{delivery.subtitle}</h2>
-                                  </div>
-                                  <div className='mt-3'>
-                                    {delivery.price.currencyCode}{" "}{parseFloat(delivery.price.amount).toFixed(2)}
-                                  </div>
-                                </div>
-                              )
-                            })
-                          }
-                          </div>
-                          
-                        </section>
-                      
-                        <section className='mt-5 pt-5 text-sm space-y-2
-                      md:mt-0 md:p-5 md:w-full'>
-                          <div className="flex items-center justify-between">
-                                <h1 className="text-lg font-semibold text-primary">Payment Method</h1>
-                               
-                              </div>
-                          <div>
-                            Credit Card
-                          </div>
-                          <div>
-                            Paypal
-                          </div>
+                        {
+                          shippingAddressSelected && 
+                          <section className='mt-5 pt-5 text-sm space-y-2
+                        md:mt-0 md:p-5 md:w-full'>
+                            <div className="flex items-center justify-between">
+                              <h1 className="text-lg font-semibold text-primary">Delivery Method</h1>
+                              {
+                                  shippingRateSelected &&
+                                  <PencilIcon onClick={onEditDeliveryMethodHandler} className="w-4 h-4 cursor-pointer
+                                  hover:text-primary" />
+                                }
+                            </div>
+                                {
+                                  shippingInformationLoading ? 
+                                    <Spinner  primaryColor="fill-primary" secondaryColor='text-slate-300' title="Loading..." />
+                                  :                              
+                                    <div className="flex flex-col p-2 w-full space-y-2
+                                      md:rounded-lg">
+                                    {
+                                      !shippingRateSelected && checkoutCreateData && checkoutCreateData?.availableShippingRates.shippingRates ? 
+                                      
+                                      checkoutCreateData.availableShippingRates.shippingRates.map((rate, idx) => {
+                                        // console.log(idx);
+                                        return (
+                                          <div key={idx} className="flex items-center justify-between p-4 ring-1 ring-gray-200 rounded-xl
+                                          group
+                                          ">
+                                            <InputRadio 
+                                              selectedValue={selectedShippingRate}
+                                              value={`${rate.handle}`}
+                                              id={`${rate.handle}`}
+                                              name={`shipping_rate`}
+                                              title={`${rate.title}`}
+                                              onChangeHandler={(e:any) => onSelectShippingRate(e.target.id) }     
+                                            />
+                                            <div className="flex items-center justify-end flex-shrink-0">
+                                              {
+                                                rate.priceV2.amount === "0.0" ? <span>FREE</span>
+                                                :
+                                                <span>
+                                                  {rate.priceV2.currencyCode} {parseFloat(rate.priceV2.amount).toFixed(2)}
+                                                </span>
+                                              }
+                                            </div>
+                                          </div>                                          
+                                        )
+                                      })
+                                      : 
+                                      
+                                        shippingRateSelected ? 
+                                            renderSelectedShippingRate
+                                        :                                      
+                                        <div key="shopify-Economy-0.00" className="flex flex-col justify-between w-full p-3 ring-1 ring-primary rounded-lg cursor-pointer hover:ring-1 hover:ring-primary hover:bg-slate-50">
+                                          <div>
+                                            <h1 className="text-lg" >Economy</h1>
+                                            {/* <h2 className="text-sm text-gray-500">{delivery.title}</h2> */}
+                                          </div>
+                                          <div className='mt-3'>
+                                            FREE
+                                          </div>
+                                        </div>
+                                      
+                                    }
 
-                         
+                                    {
+                                      !shippingRateSelected &&                          
+                                      <div onClick={onDeliveryMethodHandler} className="flex w-full items-center justify-center  bg-sky-700 py-3 px-5 text-white rounded-lg group cursor-pointer space-x-3 ">
+                                        {
+                                          shippingRateLoading &&
+                                          <Spinner  primaryColor="fill-primary" secondaryColor='text-sky-700' ringColor="text-sky-200" 
+                                          w="w-6" h="h-6" title="" />
+                                        }
+                                        <button className="group-hover:text-orange-200">
+                                          Continue to Payment
+                                        </button>
+                                        <ChevronRightIcon className="group-hover:text-orange-200 w-4 h-4"/>
+                                      </div>
+                                    }
 
-                        </section>
+                                    </div>
+                                }
+                          </section>
+                        }
+
+                        {
+                          shippingRateSelected && !paymentMethodSelected ? 
+                          <section className='mt-5 pt-5 text-sm space-y-2 md:mt-0 md:p-5 md:w-full'>
+                            <div className="flex items-center justify-between">
+                              <h1 className="text-lg font-semibold text-primary">Payment Method</h1>
+                              {
+                                paymentMethodSelected &&
+                                <PencilIcon onClick={onEditPaymentMethodHandler} className="w-4 h-4 cursor-pointer
+                                hover:text-primary" />
+                              }
+                            </div>
+                            <div className="flex flex-col p-2 w-full space-y-2 md:rounded-lg">
+                              <div className="flex flex-col items-center justify-between p-4 ring-1 ring-gray-200 rounded-xl group">
+                                <InputRadio 
+                                  selectedValue={selectedPaymentMethod}
+                                  value={`cc`}
+                                  id={`pm_cc`}
+                                  name={`payment_method`}
+                                  title={`Credit Card`}
+                                  onChangeHandler={(e:any) => onSelectPaymentMethod("cc") }     
+                                />       
+                                {
+                                  selectedPaymentMethod === "cc" ?
+                                  <div className="w-full space-y-5 p-5 ring-0 ring-gray-500">
+                                    <div>
+                                      <InputFields type="text" title="Card Number" id="cc" name="cc" placeholder="" 
+                                      value={ctxPaymentMethod.info.cc || ""}
+                                      onChangeHandler={(e:any) => setCtxPaymentMethod(
+                                        {
+                                          ...ctxPaymentMethod,
+                                          info: {
+                                            ...ctxPaymentMethod.info,
+                                            cc: e.target.value
+                                          }
+                                        }
+                                      )}
+                                      hasError={hasError}
+                                      required={true}
+                                      />
+                                    </div>
+                                    <div>
+                                      <InputFields type="text" title="Name on Card" id="nameoncc" name="nameoncc" placeholder="" 
+                                      value={ctxPaymentMethod.info.nameoncc || ""}
+                                      onChangeHandler={(e:any) => setCtxPaymentMethod(
+                                        {
+                                          ...ctxPaymentMethod,
+                                          info: {
+                                            ...ctxPaymentMethod.info,
+                                            nameoncc: e.target.value
+                                          }
+                                        }
+                                      )}
+                                      hasError={hasError}
+                                      required={true}
+                                      />
+                                    </div>
+                                    <div className='flex space-x-5 ring-0 ring-gray-500 items-center justify-between md:flex-col md:space-x-0 md:space-y-5'>
+                                      <div className='w-1/2 ring-0 ring-red-500 md:w-full'>
+                                        <InputFields type="text" title="Exp.Date" id="expdate" name="expdate" placeholder="" 
+                                        value={ctxPaymentMethod.info.expdate || ""}
+                                        onChangeHandler={(e:any) => setCtxPaymentMethod(
+                                          {
+                                            ...ctxPaymentMethod,
+                                            info: {
+                                              ...ctxPaymentMethod.info,
+                                              expdate: e.target.value
+                                            }
+                                          }
+                                        )}
+                                        hasError={hasError}
+                                        required={true}
+                                        />
+                                      </div>
+                                      <div className='w-1/2 ring-0 ring-blue-500 md:w-full'>
+                                        <InputFields type="text" title="CVV" id="cvv" name="cvv" placeholder="" 
+                                          value={ctxPaymentMethod.info.cvv || ""}
+                                          onChangeHandler={(e:any) => setCtxPaymentMethod(
+                                            {
+                                              ...ctxPaymentMethod,
+                                              info: {
+                                                ...ctxPaymentMethod.info,
+                                                cvv: e.target.value
+                                              }
+                                            }
+                                          )}
+                                          hasError={hasError}
+                                          required={true}
+                                          />
+                                      </div>
+
+                                    </div>
+                                  </div>
+                                  : ""
+                                }                         
+                              </div>
+                              
+                              <div className="flex items-center justify-between p-4 ring-1 ring-gray-200 rounded-xl group">
+                                <InputRadio 
+                                    selectedValue={selectedPaymentMethod}
+                                    value={`paypal`}
+                                    id={`pm_paypal`}
+                                    name={`payment_method`}
+                                    title={`Paypal`}
+                                    onChangeHandler={(e:any) => onSelectPaymentMethod("paypal") }     
+                                />
+                              </div>
+                            </div>
+                              
+                            
+                            {
+                              !paymentMethodSelected &&                          
+                              <div onClick={onPaymentMethodHandler} className="flex w-full items-center justify-center  bg-sky-700 py-3 px-5 text-white rounded-lg group cursor-pointer space-x-3 ">
+                                {
+                                  paymentMethodLoading &&
+                                  <Spinner  primaryColor="fill-primary" secondaryColor='text-sky-700' ringColor="text-sky-200" 
+                                  w="w-6" h="h-6" title="" />
+                                }
+                                <button className="group-hover:text-orange-200">
+                                  Select Payment
+                                </button>
+                                <ChevronRightIcon className="group-hover:text-orange-200 w-4 h-4"/>
+                              </div>
+                            }
+
+                          </section>
+                          : 
+                          
+                            paymentMethodSelected &&                          
+                            <section className='mt-5 pt-5 text-sm space-y-2 md:mt-0 md:p-5 md:w-full'>
+                            <div className="flex items-center justify-between">
+                              <h1 className="text-lg font-semibold text-primary">Payment Method</h1>
+                              {
+                                paymentMethodSelected &&
+                                <PencilIcon onClick={onEditPaymentMethodHandler} className="w-4 h-4 cursor-pointer
+                                hover:text-primary" />
+                              }
+                            </div>
+                            { renderSelectedPayment }
+                            </section>
+                          
+                        }
+                        
                         
                       </>
                     }
@@ -814,7 +1191,11 @@ const Checkout = (props: any) => {
                     after:mb-5
                     ">
                       { 
-                      ctxCart.lines && ctxCart.lines.edges!.length > 0 ? renderCartItems : 
+                      ctxCart.lines && ctxCart.lines.edges!.length > 0 ? 
+                      
+                      renderCartItems 
+
+                      : 
                       // loadingCart ? <Spinner  primaryColor="fill-primary" secondaryColor='text-slate-300'
                       // title="Loading..." /> :
                       <div>No items in shopping cart</div>  
@@ -825,29 +1206,67 @@ const Checkout = (props: any) => {
                     <>
                       <div className="flex items-center justify-between">
                         <span>Subtotal:</span>
-                        <span>{ctxCart?.estimatedCost?.subtotalAmount ? ctxCart?.estimatedCost?.subtotalAmount?.currencyCode : ""} 
-                        {" "}
-                        {ctxCart?.estimatedCost?.subtotalAmount ? parseFloat(ctxCart?.estimatedCost?.subtotalAmount?.amount!).toFixed(2) : "-"}</span>
+                        <span>{
+
+                          checkoutCreateData?.subtotalPriceV2 ? <>
+                          {checkoutCreateData?.subtotalPriceV2.currencyCode}{" "}
+                          {parseFloat(checkoutCreateData?.subtotalPriceV2.amount).toFixed(2)}
+                          </> 
+                          :
+                          ctxCart?.estimatedCost?.subtotalAmount ? 
+                          `${ctxCart?.estimatedCost?.subtotalAmount?.currencyCode} ${parseFloat(ctxCart?.estimatedCost?.subtotalAmount?.amount!).toFixed(2)}` : "-"
+
+                          }
+                          </span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span>Shipping Estimate:</span>
-                        <span>-</span>
+                        <span>Discount:</span>
+                        <div>
+                          Apply
+                        </div>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span>Tax Estimate:</span>
-                        <span>{ctxCart?.estimatedCost?.totalTaxAmount ? ctxCart.estimatedCost?.totalTaxAmount?.currencyCode:""}
-                        {" "}
-                        {ctxCart?.estimatedCost?.totalTaxAmount ? parseFloat(ctxCart.estimatedCost?.totalTaxAmount?.amount!).toFixed(2) : "-"}</span>
+                        <span>Shipping:</span>
+                        <span>
+                          {
+                            shippingAddressSelected && 
+                            shippingRateSelected &&
+                            checkoutCreateData?.shippingLine ? <>
+                              {checkoutCreateData?.shippingLine.priceV2.currencyCode}{" "}
+                              {parseFloat(checkoutCreateData?.shippingLine.priceV2.amount).toFixed(2)}
+                            </> : "-"
+                          }
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Tax:</span>
+                        <span>{
+                          checkoutCreateData?.totalTaxV2 ? <>
+                          {checkoutCreateData?.totalTaxV2.currencyCode}{" "}
+                          {parseFloat(checkoutCreateData?.totalTaxV2.amount).toFixed(2)}
+                          </> 
+                          :
+                          ctxCart?.estimatedCost?.totalTaxAmount ? `${ctxCart.estimatedCost?.totalTaxAmount?.currencyCode} ${parseFloat(ctxCart.estimatedCost?.totalTaxAmount?.amount!).toFixed(2)}` : "-"}
+                        </span>
                       </div>
                       <div className="flex items-center justify-between border-t-2 border-black pt-2 text-sky-900">
                         <span className="text-lg font-bold">Order Total:</span>
-                        <span className="text-lg font-bold">{ctxCart?.estimatedCost?.totalAmount ? ctxCart?.estimatedCost?.totalAmount?.currencyCode : ""}{" "} 
-                        {
-                        ctxCart?.estimatedCost?.totalAmount ? parseFloat(ctxCart?.estimatedCost?.totalAmount?.amount!).toFixed(2) : "-"}</span>
+                        <span className="text-lg font-bold">
+                          {
+                            checkoutCreateData?.totalPriceV2 ? 
+                            <>
+                              {checkoutCreateData?.totalPriceV2.currencyCode}{" "}
+                              {parseFloat(checkoutCreateData?.totalPriceV2.amount).toFixed(2)}
+                            </> 
+                            :
+                            ctxCart?.estimatedCost?.totalAmount ? 
+                            `${ctxCart?.estimatedCost?.totalAmount?.currencyCode} ${parseFloat(ctxCart?.estimatedCost?.totalAmount?.amount!).toFixed(2)}` : "-"
+                          }
+                        </span>
                       </div>
                       
                       {
-                        allowConfirmOrder ?
+                        shippingAddressSelected && shippingRateSelected && paymentMethodSelected ?
                       
                       <div onClick={onConfirmOrderHandler} className="flex items-center justify-center w-full bg-sky-700 py-3 px-5 text-white rounded-lg cursor-pointer mt-6 hover:text-orange-200">
                         Confirm Order

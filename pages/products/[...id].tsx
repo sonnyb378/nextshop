@@ -44,6 +44,12 @@ import SideCart from '../../components/cart/SideCart';
 import QuantityDropdown from '../../components/cart/QuantityDropdown';
 
 import { XIcon, ExclamationCircleIcon } from "@heroicons/react/outline";
+import { selectCheckout } from '../../app/store/slices/checkout';
+import { ShopifyFunctions } from '../../utils/shopifyFunctions';
+import { Result } from 'postcss';
+// import checkout from '../../app/store/slices/checkout';
+
+import { useAppContext, useAppContextSetters} from "../../context/state";
 
 interface AlertStruct {
   title: string|null;
@@ -54,6 +60,10 @@ const ProductDetail = (props:any) => {
   const auth = useAppSelector(selectAuth);
   const profile = useAppSelector(selectProfile);
   const cart = useAppSelector(selectCart);
+  const checkout = useAppSelector(selectCheckout);
+
+  const { checkout: ctxCheckout } = useAppContext();
+  const { setCtxCheckout } = useAppContextSetters();
 
   const [selectedColor, setSelectedColor] = useState({ option: "Color", name: "", hexColor: "", option_value: null});
   const [selectedSize, setSelectedSize] = useState({ option: "Size", option_value: null});
@@ -198,7 +208,12 @@ const ProductDetail = (props:any) => {
     });
   }
 
-  const addToCartHandler = async (productId: string, title: string) => {
+
+  const cartFunctions = async (callback: Promise<{response:any, result:any}> ) => {
+    return callback;
+  }
+
+  const addToCartHandler = async (title: string) => {
     // console.log("item added to cart! ", title);
 
     const cartAttributesObj = [{
@@ -241,46 +256,47 @@ const ProductDetail = (props:any) => {
       lines: {
         attributes: itemsAttributes,
         merchandiseId: variant.id,
-        quantity: itemQty,
-        // sellingPlanId: "" 
+        quantity: itemQty
       },
     }
 
-    // console.log("cartCreateInputVariables: ", cartCreateInputVariables);
-    // console.log("cartLinesAddInputVariables: ", cartLinesAddInputVariables);
-
-    const response = await fetch(`${process.env.NEXT_PUBLIC_SHOP_URL}/api/${cart.cartId ? "cart/line" : "cart" }`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          cartVariables: cart.cartId ? cartLinesAddInputVariables : cartCreateInputVariables
-        })
-      }
-    );
-    const result = await response.json();
-
-    if (response.ok) {
-      // console.log("cart result: ", result)      
+    // cartCreate or cartLinesAdd
+    const sf = new ShopifyFunctions();
+    const { response, result } = await cartFunctions(!cart.cartId ? sf.cartCreate(cartCreateInputVariables) : sf.cartLinesAdd(cartLinesAddInputVariables));
+    
+    if (response.ok) {    
       setAlert((prev) => {
         return { ...prev, 
           title: title, 
           qty: itemQty
         }
       });
-
       let itemcount = 0
       result.cart.lines.edges.forEach((line:any) => {
         itemcount += line.node.quantity;
-      })
-    
+      })    
       dispatch(setCartData({ cartId: result.cart.id, itemsCount: itemcount}))
+    }
 
+    // checkoutLineItemsAdd
+    if (checkout.checkoutId) {
+      const sf = new ShopifyFunctions();
+      const lineItems = {
+        customAttributes: itemsAttributes,  
+        quantity: itemQty,
+        variantId: variant?.id
+      }
+      // console.log("lineItems: ", lineItems);
+      const { response, result } = await sf.checkoutLineItemsAdd(checkout.checkoutId, lineItems)
+      if (response.ok) {    
+        // console.log("checkout: ", result?.data);
+        setCtxCheckout(result?.data);
+      }
     }
 
   }
 
+  
   const onQuantityChangeHandler = (e: any) => {
     // console.log("quantity: ", e);
     setItemQty(e);
@@ -408,7 +424,7 @@ const ProductDetail = (props:any) => {
             {
               variant?.quantityAvailable > 0 ?
             
-            <div onClick={addToCartHandler.bind(this, product.id, product.title)} className='flex items-center justify-center mt-5 w-full bg-sky-700 text-white rounded-xl py-2 cursor-pointer hover:text-orange-300 hover:bg-sky-800'>
+            <div onClick={addToCartHandler.bind(this, product.title)} className='flex items-center justify-center mt-5 w-full bg-sky-700 text-white rounded-xl py-2 cursor-pointer hover:text-orange-300 hover:bg-sky-800'>
               Add to Cart
             </div>
             :   
