@@ -8,6 +8,8 @@ function classNames(...classes:any[]) {
 
 const DropdownAddress:React.FC<{title:string; value:string, options:[any],onChangeHandler:any}> = ({title,value,options,onChangeHandler}) => {
   
+  // console.log("dropdown: ", value, options);
+
   let addressLine = "";
   if (value !== "new_address") {
     const selected = options?.filter(address => value === address.node.id)
@@ -101,3 +103,5 @@ const DropdownAddress:React.FC<{title:string; value:string, options:[any],onChan
 }
 
 export default DropdownAddress
+
+

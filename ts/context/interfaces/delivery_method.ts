@@ -1,6 +1,7 @@
 export interface IDeliveryMethod {
-  type: string;
-  price: {
+  handle: string;
+  title: string;
+  priceV2: {
     amount: string;
     currencyCode: string;
   };

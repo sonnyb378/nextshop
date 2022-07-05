@@ -1,6 +1,7 @@
 import { gql } from "@apollo/client";
 import type { NextApiRequest, NextApiResponse } from "next";
 import client from "../../../../utils/apolloClient";
+
 import { checkoutFields } from "../index";
 
 type CheckoutError = {
@@ -14,31 +15,32 @@ type Data = {
   checkoutUserErrors: [CheckoutError] | null;
 };
 
-const UPDATE_CHECKOUT_SHIPPING_ADDRESS = gql`
-  mutation checkoutShippingAddressUpdateV2($checkoutId: ID!, $shippingAddress: MailingAddressInput!) {
-    checkoutShippingAddressUpdateV2(checkoutId: $checkoutId, shippingAddress: $shippingAddress) {
+const UPDATE_SHIPPING_LINE = gql`
+  mutation checkoutShippingLineUpdate($checkoutId: ID!, $shippingRateHandle: String!) {
+    checkoutShippingLineUpdate(checkoutId: $checkoutId, shippingRateHandle: $shippingRateHandle) {
       ${checkoutFields}
       checkoutUserErrors {
-        code
-        field
-        message
+        code, field, message
       }
     }
   }
 `;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<Data>) {
-  const { checkoutId, shippingAddress } = req.body;
+  const method = req.method;
+
+  const { checkoutId, shippingRateHandle } = req.body;
+  const inputVars = {
+    checkoutId,
+    shippingRateHandle,
+  };
 
   const { data, errors } = await client.mutate({
-    mutation: UPDATE_CHECKOUT_SHIPPING_ADDRESS,
-    variables: {
-      checkoutId,
-      shippingAddress,
-    },
+    mutation: UPDATE_SHIPPING_LINE,
+    variables: inputVars,
   });
   res.status(200).json({
-    checkout: data?.checkoutShippingAddressUpdateV2.checkout,
-    checkoutUserErrors: data?.checkoutShippingAddressUpdateV2.checkoutUserErrors,
+    checkout: data?.checkoutShippingLineUpdate.checkout,
+    checkoutUserErrors: data?.checkoutShippingLineUpdate.checkoutUserErrors,
   });
 }

@@ -8,7 +8,7 @@ const InputRadio:React.FC<{
   name: string,
   title: string
 }> = ({onChangeHandler, selectedValue, value, id, name, title}) => {
-  // console.log("selectedValue: ",selectedValue);
+  // console.log("selectedValue: ",selectedValue, value);
   // console.log("title: ",title.includes("|"));
   const titleName = title.includes("|") ? title.trim().split("|") : title;
   // console.log("titleName: ", typeof titleName);

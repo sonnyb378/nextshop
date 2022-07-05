@@ -34,11 +34,13 @@ interface MerchandiseStruct {
   product: ProductStruct;
 }
 export interface ILinesEdges {
-  id: string;
-  attributes: [Attrs];
-  estimatedCost: ICartCost;
-  quantity: number;
-  merchandise: MerchandiseStruct;
+  node: {
+    id: string;
+    attributes: [Attrs];
+    estimatedCost: ICartCost;
+    quantity: number;
+    merchandise: MerchandiseStruct;
+  };
 }
 interface LinesStruct {
   edges: [ILinesEdges] | null;
@@ -59,4 +61,46 @@ export interface ICartDataStruct {
 export interface ICartState {
   cartId: string | null;
   itemsCount: number;
+}
+
+export interface ICheckoutLineEdges {
+  node: {
+    customAttributes: [Attrs];
+    discountAllocations: any;
+    id: string;
+    quantity: number;
+    title: string;
+    unitPrice: any;
+    variant: {
+      id: string;
+      image: IImageStruct;
+      priceV2: AmountStruct;
+      product: {
+        id: string;
+        title: string;
+        description: string;
+        priceRange: {
+          maxVariantPrice: AmountStruct;
+          minVariantPrice: AmountStruct;
+        };
+      };
+      quantityAvailable: number;
+      sku: string;
+      selectedOptions: [
+        {
+          name: string;
+          value: string;
+        }
+      ];
+      title: string;
+    };
+  };
+}
+
+export interface ICheckout {
+  id: string;
+  webUrl: string;
+  lineItems: {
+    edges: [ICheckoutLineEdges];
+  };
 }

@@ -5,12 +5,14 @@ import { ICartDataStruct, ILinesEdges } from "../ts/cart/interfaces/cart";
 import { IShippingInformation } from "../ts/context/interfaces/shipping_information"
 import { IDeliveryMethod} from "../ts/context/interfaces/delivery_method";
 import { IPaymentMethod } from "../ts/context/interfaces/payment_method";
+import { ICheckout } from "../ts/cart/interfaces/cart";
 import { Countries } from "../model/countries";
 
 export interface CheckoutState {
+  checkout: ICheckout | null;
+  cart: ICartDataStruct;
   contactInformation: { email: string };
   shippingInformation: IShippingInformation;
-  cart: ICartDataStruct;
   deliveryMethod: IDeliveryMethod;
   paymentMethod: IPaymentMethod;
 }  
@@ -20,7 +22,12 @@ export interface CheckoutState {
 // }
 
 const initialState = {
-  
+  checkout: null,
+  cart: {
+    id: null,
+    estimatedCost: null,
+    lines: null
+  },
   contactInformation: {
     email: "",
   },
@@ -35,93 +42,31 @@ const initialState = {
     zip: "",
     country: Countries[231],
     phone: "",
-  },
-  cart: {
-    id: null,
-    estimatedCost: null,
-    lines: null
-    // id: "",
-    // estimatedCost: {
-    //   subtotalAmount: {
-    //     amount: "",
-    //     currencyCode: "",
-    //   },
-    //   totalAmount: {
-    //     amount: "",
-    //     currencyCode: "",
-    //   },
-    //   totalDutyAmount: {
-    //     amount: "",
-    //     currencyCode: "",
-    //   },
-    //   totalTaxAmount: {
-    //     amount: "",
-    //     currencyCode: "",
-    //   },
-    // },
-    // lines: {
-    //   edges: [
-    //     {
-    //       id: "",
-    //       attributes: [{ key: "", value: "" }],
-    //       estimatedCost: {
-    //         subtotalAmount: null,
-    //         totalAmount: null,
-    //         totalDutyAmount: null,
-    //         totalTaxAmount: null,
-    //       },
-    //       quantity: 0,
-    //       merchandise: {
-    //         id: "",
-    //         title: "",
-    //         quantityAvailable: 0,
-    //         image: {
-    //           url: "",
-    //           width: 0,
-    //           height: 0,
-    //         },
-    //         priceV2: {
-    //           amount: "0.00",
-    //           currencyCode: "USD",
-    //         },
-    //         product: {
-    //           id: "",
-    //           title: "",
-    //           description: "",
-    //         },
-    //       },
-    //     },
-    //   ] as [ILinesEdges],
-    //   pageInfo: {
-    //     endCursor: "",
-    //     startCursor: "",
-    //     hasNextPage: false,
-    //     hasPreviousPage: false,
-    //   },
-    // },
-  },
+  }, 
   deliveryMethod: {
-    type: "Standard",
-    price: {
+    handle: "",
+    title: "",
+    priceV2: {
       amount: "",
       currencyCode: "",
     },
   },
   paymentMethod: {
-    type: "Credit Card",
+    type: "cc",
     info: {
       cc: "",
       nameoncc: "",
       expdate: "",
-      cvc: "",
+      cvv: "",
     },
   }
 };
 
 const ctxSetters = {
+  setCtxCheckout: (input:any) => {},
+  setCtxCart: (input:any) => {},
   setCtxContactInformation: (email: string) => {},
   setCtxShippingInformation: (input:any) => {},
-  setCtxCart: (input:any) => {},
   setCtxDeliveryMethod: (input:any) =>{},
   setCtxPaymentMethod: (input:any) => {},
 }
@@ -132,6 +77,16 @@ const AppContextSetters = createContext(ctxSetters)
 export const AppWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [contextState, setContextState] = useState<CheckoutState>(initialState);
   
+  const setCtxCheckout = useCallback((input:ICheckout) => {
+    // console.log("setCtxCart");
+    setContextState((prev) => {
+        return {
+            ...prev,
+            checkout: { ...input }
+            }
+    })
+  },[])
+
   const setCtxCart = useCallback((input:ICartDataStruct) => {
     // console.log("setCtxCart");
     setContextState((prev) => {
@@ -168,34 +123,35 @@ export const AppWrapper: React.FC<{ children: React.ReactNode }> = ({ children }
 
 
   const setCtxDeliveryMethod = useCallback((input:any) => {
-    // setContextState((prev) => {
-    //   return {
-    //     ...prev,
-    //     deliveryMethod: {
-    //       ...input
-    //     }
-    //   }
-    // })
+    setContextState((prev) => {
+      return {
+        ...prev,
+        deliveryMethod: {
+          ...input
+        }
+      }
+    })
   },[])
 
   const setCtxPaymentMethod = useCallback((input:any) => {
-    // setContextState((prev) => {
-    //   return {
-    //     ...prev,
-    //     paymentMethod: {
-    //       ...input
-    //     }
-    //   }
-    // })
+    setContextState((prev) => {
+      return {
+        ...prev,
+        paymentMethod: {
+          ...input
+        }
+      }
+    })
   },[])
 
   const ctxSetters = useMemo(() => ({ 
+    setCtxCheckout,
     setCtxCart, 
     setCtxContactInformation,
     setCtxShippingInformation,
     setCtxDeliveryMethod,
     setCtxPaymentMethod
-  }), [setCtxCart, setCtxContactInformation, setCtxShippingInformation, setCtxDeliveryMethod, setCtxPaymentMethod])
+  }), [setCtxCheckout, setCtxCart, setCtxContactInformation, setCtxShippingInformation, setCtxDeliveryMethod, setCtxPaymentMethod])
 
   return <AppContext.Provider value={ contextState  }>
     <AppContextSetters.Provider value={ ctxSetters }>
